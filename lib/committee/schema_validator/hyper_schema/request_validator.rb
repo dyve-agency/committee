@@ -8,24 +8,24 @@ module Committee
           @link = link
           @check_content_type = options.fetch(:check_content_type, true)
           @check_header = options.fetch(:check_header, true)
+
+          @validator = options[:custom_validator] || Proc.new do |schema, data, error_class|
+            valid, errors = schema.validate(data)
+            if !valid
+              errors = JsonSchema::SchemaError.aggregate(errors).join("\n")
+              raise error_class, "Invalid request.\n\n#{errors}"
+            end
+          end
         end
 
         def call(request, params, headers)
           check_content_type!(request, params) if @check_content_type
           if @link.schema
-            valid, errors = @link.schema.validate(params)
-            if !valid
-              errors = JsonSchema::SchemaError.aggregate(errors).join("\n")
-              raise InvalidRequest, "Invalid request.\n\n#{errors}"
-            end
+            @validator.call(@link.schema, params, InvalidRequest)
           end
 
           if @check_header && @link.respond_to?(:header_schema) && @link.header_schema
-            valid, errors = @link.header_schema.validate(headers)
-            if !valid
-              errors = JsonSchema::SchemaError.aggregate(errors).join("\n")
-              raise InvalidRequest, "Invalid request.\n\n#{errors}"
-            end
+            @validator.call(@link.header_schema, headers, InvalidRequest)
           end
         end
 

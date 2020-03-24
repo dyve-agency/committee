@@ -15,7 +15,7 @@ module Committee
           status, headers, response = @app.call(request.env)
 
           v = build_schema_validator(request)
-          v.response_validate(status, headers, response) if v.link_exist? && self.class.validate?(status, validate_success_only)
+          v.response_validate(status, headers, response, @custom_validator) if v.link_exist? && self.class.validate?(status, validate_success_only)
 
         rescue Committee::InvalidResponse
           handle_exception($!, request.env)

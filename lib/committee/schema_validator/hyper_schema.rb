@@ -10,7 +10,7 @@ module Committee
         @validator_option = validator_option
       end
 
-      def request_validate(request)
+      def request_validate(request, custom_validator = nil)
         # Attempts to coerce parameters that appear in a link's URL to Ruby
         # types that can be validated with a schema.
         param_matches_hash = validator_option.coerce_path_params ? coerce_path_params : {}
@@ -23,12 +23,12 @@ module Committee
 
         request.env[validator_option.params_key].merge!(param_matches_hash) if param_matches_hash
 
-        request_schema_validation(request)
+        request_schema_validation(request, custom_validator)
         parameter_coerce!(request, link, validator_option.params_key)
         parameter_coerce!(request, link, "rack.request.query_hash") if link_exist? && !request.GET.nil? && !link.schema.nil?
       end
 
-      def response_validate(status, headers, response, _test_method = false)
+      def response_validate(status, headers, response, custom_validator = nil, _test_method = false)
         return unless link_exist?
 
         full_body = +""
@@ -36,7 +36,7 @@ module Committee
           full_body << chunk
         end
         data = full_body.empty? ? {} : JSON.parse(full_body)
-        Committee::SchemaValidator::HyperSchema::ResponseValidator.new(link, validate_success_only: validator_option.validate_success_only).call(status, headers, data)
+        Committee::SchemaValidator::HyperSchema::ResponseValidator.new(link, validate_success_only: validator_option.validate_success_only, custom_validator:  custom_validator).call(status, headers, data)
       end
 
       def link_exist?
@@ -77,9 +77,9 @@ module Committee
           ).call
         end
 
-        def request_schema_validation(request)
+        def request_schema_validation(request, custom_validator = nil)
           return unless link_exist?
-          validator = Committee::SchemaValidator::HyperSchema::RequestValidator.new(link, check_content_type: validator_option.check_content_type, check_header: validator_option.check_header)
+          validator = Committee::SchemaValidator::HyperSchema::RequestValidator.new(link, check_content_type: validator_option.check_content_type, check_header: validator_option.check_header, custom_validator: custom_validator)
           validator.call(request, request.env[validator_option.params_key], request.env[validator_option.headers_key])
         end
 

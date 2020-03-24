@@ -15,6 +15,8 @@ module Committee
 
         @router = @schema.build_router(options)
         @accept_request_filter = options[:accept_request_filter] || -> (_) { true }
+
+        @custom_validator = options[:custom_validator]
       end
 
       def call(env)

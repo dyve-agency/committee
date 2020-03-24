@@ -10,7 +10,14 @@ module Committee
           @link = link
           @validate_success_only = options[:validate_success_only]
 
-          @validator = JsonSchema::Validator.new(target_schema(link))
+          @validator = options[:custom_validator] || Proc.new do |schema, data, error_class|
+            validator = JsonSchema::Validator.new(schema)
+
+            unless validator.validate(data)
+              errors = JsonSchema::SchemaError.aggregate(validator.errors).join("\n")
+              raise error_class, "Invalid response.\n\n#{errors}"
+            end
+          end
         end
 
         def call(status, headers, data)
@@ -39,9 +46,8 @@ module Committee
             return if data == nil
           end
 
-          if Committee::Middleware::ResponseValidation.validate?(status, validate_success_only) && !@validator.validate(data)
-            errors = JsonSchema::SchemaError.aggregate(@validator.errors).join("\n")
-            raise InvalidResponse, "Invalid response.\n\n#{errors}"
+          if Committee::Middleware::ResponseValidation.validate?(status, validate_success_only)
+            @validator.call(target_schema(@link), data, InvalidResponse)
           end
         end
 
