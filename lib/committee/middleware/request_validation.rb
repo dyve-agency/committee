@@ -7,6 +7,7 @@ module Committee
         super
 
         @strict  = options[:strict]
+        @validation_predicate = options[:validation_predicate] || proc { |_request| true }
 
         # deprecated
         @allow_extra = options[:allow_extra]
@@ -14,10 +15,12 @@ module Committee
 
       def handle(request)
         begin
-          schema_validator = build_schema_validator(request)
-          schema_validator.request_validate(request, @custom_validator)
+          if @validation_predicate.call(request)
+            schema_validator = build_schema_validator(request)
+            schema_validator.request_validate(request, @custom_validator)
 
-          raise Committee::NotFound, "That request method and path combination isn't defined." if !schema_validator.link_exist? && @strict
+            raise Committee::NotFound, "That request method and path combination isn't defined." if !schema_validator.link_exist? && @strict
+          end
         rescue Committee::BadRequest, Committee::InvalidRequest
           handle_exception($!, request.env)
           raise if @raise
