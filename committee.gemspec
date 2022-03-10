@@ -20,6 +20,7 @@ Gem::Specification.new do |s|
 
   s.add_dependency "rack", ">= 1.5"
   s.add_dependency "openapi_parser", ">= 0.6.1"
+  s.add_dependency "oj"
 
   s.add_development_dependency "minitest", "~> 5.3"
   s.add_development_dependency "rack-test", "~> 0.6"

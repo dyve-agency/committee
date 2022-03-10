@@ -1,3 +1,4 @@
+require 'oj'
 # frozen_string_literal: true
 
 module Committee
@@ -35,7 +36,7 @@ module Committee
         response.each do |chunk|
           full_body << chunk
         end
-        data = full_body.empty? ? {} : JSON.parse(full_body)
+        data = full_body.empty? ? {} : Oj.load(full_body)
         Committee::SchemaValidator::HyperSchema::ResponseValidator.new(link, validate_success_only: validator_option.validate_success_only, custom_validator:  custom_validator).call(status, headers, data)
       end
 
