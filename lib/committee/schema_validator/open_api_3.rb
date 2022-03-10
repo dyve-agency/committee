@@ -14,12 +14,7 @@ module Committee
       def request_validate(request)
         return unless link_exist?
 
-        path_params = validator_option.coerce_path_params ? coerce_path_params : {}
-
         request_unpack(request)
-
-        request.env[validator_option.params_key]&.merge!(path_params) unless path_params.empty?
-
         request_schema_validation(request)
 
         copy_coerced_data_to_query_hash(request)
@@ -30,7 +25,14 @@ module Committee
         response.each do |chunk|
           full_body << chunk
         end
-        data = full_body.empty? ? {} : JSON.parse(full_body)
+
+        parse_to_json = !validator_option.parse_response_by_content_type || 
+                        headers.fetch('Content-Type', nil)&.start_with?('application/json')
+        data = if parse_to_json
+          full_body.empty? ? {} : JSON.parse(full_body)
+        else
+          full_body
+        end
 
         strict = test_method
         Committee::SchemaValidator::OpenAPI3::ResponseValidator.
@@ -42,16 +44,13 @@ module Committee
         !@operation_object.nil?
       end
 
-      def coerce_form_params(_parameter)
-        # Empty because request_schema_validation checks and coerces
-      end
-
       private
 
       attr_reader :validator_option
 
       def coerce_path_params
-        @operation_object.coerce_path_parameter(@validator_option)
+        return Committee::Utils.indifferent_hash unless validator_option.coerce_path_params
+        Committee::RequestUnpacker.indifferent_params(@operation_object.coerce_path_parameter(@validator_option))
       end
 
       def request_schema_validation(request)
@@ -66,22 +65,36 @@ module Committee
       end
 
       def request_unpack(request)
-        request.env[validator_option.params_key], request.env[validator_option.headers_key] = Committee::RequestUnpacker.new(
-            request,
-            allow_form_params:  validator_option.allow_form_params,
-            allow_get_body:     validator_option.allow_get_body,
-            allow_query_params: validator_option.allow_query_params,
-            coerce_form_params: validator_option.coerce_form_params,
-            optimistic_json:    validator_option.optimistic_json,
-            schema_validator:   self
-        ).call
+        unpacker = Committee::RequestUnpacker.new(
+          allow_form_params:  validator_option.allow_form_params,
+          allow_get_body:     validator_option.allow_get_body,
+          allow_query_params: validator_option.allow_query_params,
+          optimistic_json:    validator_option.optimistic_json,
+        )
+
+        request.env[validator_option.headers_key] = unpacker.unpack_headers(request)
+
+        request_param, is_form_params = unpacker.unpack_request_params(request)
+        request.env[validator_option.request_body_hash_key] = request_param
+        request.env[validator_option.path_hash_key] = coerce_path_params
+
+        query_param = unpacker.unpack_query_params(request)
+
+        request.env[validator_option.params_key] = Committee::Utils.indifferent_hash
+        request.env[validator_option.params_key].merge!(Committee::Utils.deep_copy(query_param))
+        request.env[validator_option.params_key].merge!(Committee::Utils.deep_copy(request.env[validator_option.request_body_hash_key]))
+        request.env[validator_option.params_key].merge!(Committee::Utils.deep_copy(request.env[validator_option.path_hash_key]))
       end
 
       def copy_coerced_data_to_query_hash(request)
         return if request.env["rack.request.query_hash"].nil? || request.env["rack.request.query_hash"].empty?
 
+        query_hash_key = @validator_option.query_hash_key
+        return unless query_hash_key
+
+        request.env[query_hash_key] = {} unless request.env[query_hash_key]
         request.env["rack.request.query_hash"].keys.each do |k|
-          request.env["rack.request.query_hash"][k] = request.env[validator_option.params_key][k]
+          request.env[query_hash_key][k] = request.env[validator_option.params_key][k]
         end
       end
     end

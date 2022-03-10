@@ -6,6 +6,18 @@ info:
 servers:
 - url: https://github.com/interagent/committee/
 paths:
+  /csv:
+    get:
+      description: get csv
+      responses:
+        '200':
+          description: success
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
   /characters:
     get:
       description: get characters
@@ -301,7 +313,12 @@ paths:
                   enum:
                   - 1.0
                   - 2.1
-
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                integer:
+                  type: integer
       responses:
         '200':
           description: success
@@ -543,6 +560,42 @@ paths:
       responses:
         '204':
           description: no content
+
+  /ref-sample:
+    get:
+      responses:
+        '200':
+          description: sample of remote schema reference
+          content:
+            application/json:
+              schema:
+                $ref: referee.yaml#/components/schemas/referred_schema
+
+  /parameter_option_test/{integer}:
+    post:
+      description: parameter option test
+      parameters:
+      - name: integer
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: integer
+        in: query
+        required: true
+        schema:
+          type: integer    
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                integer:
+                  type: integer
+      responses:
+        '204':
+          description: sample of remote schema reference
 
 components:
   schemas:

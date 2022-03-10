@@ -11,31 +11,28 @@ module Committee
       end
 
       def request_validate(request, custom_validator = nil)
-        # Attempts to coerce parameters that appear in a link's URL to Ruby
-        # types that can be validated with a schema.
-        param_matches_hash = validator_option.coerce_path_params ? coerce_path_params : {}
-
-        # Attempts to coerce parameters that appear in a query string to Ruby
-        # types that can be validated with a schema.
-        coerce_query_params(request) if validator_option.coerce_query_params
-
         request_unpack(request)
-
-        request.env[validator_option.params_key].merge!(param_matches_hash) if param_matches_hash
 
         request_schema_validation(request, custom_validator)
         parameter_coerce!(request, link, validator_option.params_key)
         parameter_coerce!(request, link, "rack.request.query_hash") if link_exist? && !request.GET.nil? && !link.schema.nil?
       end
 
-      def response_validate(status, headers, response, custom_validator = nil, _test_method = false)
+      def response_validate(status, headers, response, _test_method = false, custom_validator = nil)
         return unless link_exist?
 
         full_body = +""
         response.each do |chunk|
           full_body << chunk
         end
-        data = full_body.empty? ? {} : JSON.parse(full_body)
+
+        data = {}
+        unless full_body.empty?
+          parse_to_json = !validator_option.parse_response_by_content_type ||
+                          headers.fetch('Content-Type', nil)&.start_with?('application/json')
+          data = JSON.parse(full_body) if parse_to_json
+        end
+
         Committee::SchemaValidator::HyperSchema::ResponseValidator.new(link, validate_success_only: validator_option.validate_success_only, custom_validator:  custom_validator).call(status, headers, data)
       end
 
@@ -43,16 +40,10 @@ module Committee
         !link.nil?
       end
 
-      def coerce_form_params(parameter)
-        return unless link_exist?
-        return unless link.schema
-        Committee::SchemaValidator::HyperSchema::StringParamsCoercer.new(parameter, link.schema).call!
-      end
-
       private
 
         def coerce_path_params
-          return unless link_exist?
+          return {} unless link_exist?
 
           Committee::SchemaValidator::HyperSchema::StringParamsCoercer.new(param_matches, link.schema, coerce_recursive: validator_option.coerce_recursive).call!
           param_matches
@@ -66,15 +57,38 @@ module Committee
         end
 
         def request_unpack(request)
-          request.env[validator_option.params_key], request.env[validator_option.headers_key] = Committee::RequestUnpacker.new(
-              request,
-              allow_form_params:  validator_option.allow_form_params,
-              allow_get_body:     validator_option.allow_get_body,
-              allow_query_params: validator_option.allow_query_params,
-              coerce_form_params: validator_option.coerce_form_params,
-              optimistic_json:    validator_option.optimistic_json,
-              schema_validator:   self
-          ).call
+          unpacker = Committee::RequestUnpacker.new(
+            allow_form_params:  validator_option.allow_form_params,
+            allow_get_body:     validator_option.allow_get_body,
+            allow_query_params: validator_option.allow_query_params,
+            optimistic_json:    validator_option.optimistic_json,
+          )
+
+          request.env[validator_option.headers_key] = unpacker.unpack_headers(request)
+
+          # Attempts to coerce parameters that appear in a link's URL to Ruby
+          # types that can be validated with a schema.
+          param_matches_hash = validator_option.coerce_path_params ? coerce_path_params : {}
+
+          # Attempts to coerce parameters that appear in a query string to Ruby
+          # types that can be validated with a schema.
+          coerce_query_params(request) if validator_option.coerce_query_params
+
+          query_param = unpacker.unpack_query_params(request)
+          request_param, is_form_params = unpacker.unpack_request_params(request)
+          coerce_form_params(request_param) if validator_option.coerce_form_params && is_form_params
+          request.env[validator_option.request_body_hash_key] = request_param
+
+          request.env[validator_option.params_key] = Committee::Utils.indifferent_hash
+          request.env[validator_option.params_key].merge!(Committee::Utils.deep_copy(query_param))
+          request.env[validator_option.params_key].merge!(Committee::Utils.deep_copy(request_param))
+          request.env[validator_option.params_key].merge!(Committee::Utils.deep_copy(param_matches_hash))
+        end
+
+        def coerce_form_params(parameter)
+          return unless link_exist?
+          return unless link.schema
+          Committee::SchemaValidator::HyperSchema::StringParamsCoercer.new(parameter, link.schema).call!
         end
 
         def request_schema_validation(request, custom_validator = nil)

@@ -7,13 +7,17 @@ module Committee
 
       def initialize(app, options = {})
         super
+
+        unless options[:strict].nil?
+          Committee.warn_deprecated("Committee: Committee::Middleware::ResponseValidation doesn't support strict option now but we'll support this option. This change break backward compatibility so please remove strict option from ResponseValidation")
+        end
         @validate_success_only = @schema.validator_option.validate_success_only
       end
 
       def handle(request)
-        begin
-          status, headers, response = @app.call(request.env)
+        status, headers, response = @app.call(request.env)
 
+        begin
           v = build_schema_validator(request)
           v.response_validate(status, headers, response, @custom_validator) if v.link_exist? && self.class.validate?(status, validate_success_only)
 
@@ -46,11 +50,7 @@ module Committee
         if @error_handler.arity > 1
           @error_handler.call(e, env)
         else
-          warn <<-MESSAGE
-          [DEPRECATION] Using `error_handler.call(exception)` is deprecated and will be change to
-            `error_handler.call(exception, request.env)` in next major version.
-          MESSAGE
-
+          Committee.warn_deprecated('Using `error_handler.call(exception)` is deprecated and will be change to `error_handler.call(exception, request.env)` in next major version.')
           @error_handler.call(e)
         end
       end

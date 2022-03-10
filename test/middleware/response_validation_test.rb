@@ -15,6 +15,14 @@ describe Committee::Middleware::ResponseValidation do
     assert_equal 200, last_response.status
   end
 
+  # TODO: remove 5.0.0
+  it "passes through a valid response" do
+    # will show deprecated message
+    @app = new_rack_app(JSON.generate([ValidApp]), {}, schema: hyper_schema, strict: true)
+    get "/apps"
+    assert_equal 200, last_response.status
+  end
+
   it "doesn't call error_handler (has a arg) when response is valid" do
     called = false
     pr = ->(_e) { called = true }
@@ -167,7 +175,10 @@ describe Committee::Middleware::ResponseValidation do
       { description: 'when not specified, includes everything', accept_request_filter: nil, expected: { status: 500 } },
       { description: 'when predicate matches, performs validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/a') }, expected: { status: 500 } },
       { description: 'when predicate does not match, skips validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/x') }, expected: { status: 200 } },
-    ].each do |description:, accept_request_filter:, expected:|
+    ].each do |h|
+      description = h[:description]
+      accept_request_filter = h[:accept_request_filter]
+      expected = h[:expected]
       it description do
         @app = new_rack_app('not_json', {}, schema: hyper_schema, prefix: '/v1', accept_request_filter: accept_request_filter)
 
@@ -181,6 +192,9 @@ describe Committee::Middleware::ResponseValidation do
   private
 
   def new_rack_app(response, headers = {}, options = {})
+    # TODO: delete when 5.0.0 released because default value changed
+    options[:parse_response_by_content_type] = true if options[:parse_response_by_content_type] == nil
+
     headers = {
       "Content-Type" => "application/json"
     }.merge(headers)

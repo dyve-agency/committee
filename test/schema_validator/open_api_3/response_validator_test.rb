@@ -12,7 +12,12 @@ describe Committee::SchemaValidator::OpenAPI3::ResponseValidator do
 
     @path = '/validate'
     @method = 'post'
-    @validator_option = Committee::SchemaValidator::Option.new({}, open_api_3_schema, :open_api_3)
+
+    # TODO: delete when 5.0.0 released because default value changed
+    options = {}
+    options[:parse_response_by_content_type] = true if options[:parse_response_by_content_type] == nil
+    
+    @validator_option = Committee::SchemaValidator::Option.new(options, open_api_3_schema, :open_api_3)
   end
 
   it "passes through a valid response" do
@@ -29,11 +34,12 @@ describe Committee::SchemaValidator::OpenAPI3::ResponseValidator do
     call_response_validator
   end
 
-  it "passes through a valid response with no registered Content-Type with strict = true" do
+  it "raises InvalidResponse when a valid response with no registered body with strict option" do
     @headers = { "Content-Type" => "application/xml" }
-    assert_raises(Committee::InvalidResponse) {
+    e = assert_raises(Committee::InvalidResponse) {
       call_response_validator(true)
     }
+    assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
   end
 
   it "passes through a valid response with no Content-Type" do
@@ -41,11 +47,12 @@ describe Committee::SchemaValidator::OpenAPI3::ResponseValidator do
     call_response_validator
   end
 
-  it "passes through a valid response with no Content-Type with strict option" do
+  it "raises InvalidResponse when a valid response with no Content-Type headers with strict option" do
     @headers = {}
-    assert_raises(Committee::InvalidResponse) {
+    e = assert_raises(Committee::InvalidResponse) {
       call_response_validator(true)
     }
+    assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
   end
 
   it "passes through a valid list response" do

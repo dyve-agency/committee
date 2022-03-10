@@ -3,27 +3,40 @@
 module Committee
   module Test
     module Methods
-      def assert_schema_conform
+      def assert_schema_conform(expected_status = nil)
         assert_request_schema_confirm unless old_behavior
-        assert_response_schema_confirm
+        assert_response_schema_confirm(expected_status)
       end
 
       def assert_request_schema_confirm
         unless schema_validator.link_exist?
-          request = "`#{request_object.request_method} #{request_object.path_info}` undefined in schema."
+          request = "`#{request_object.request_method} #{request_object.path_info}` undefined in schema (prefix: #{committee_options[:prefix].inspect})."
           raise Committee::InvalidRequest.new(request)
         end
 
         schema_validator.request_validate(request_object)
       end
 
-      def assert_response_schema_confirm
+      def assert_response_schema_confirm(expected_status = nil)
         unless schema_validator.link_exist?
-          response = "`#{request_object.request_method} #{request_object.path_info}` undefined in schema."
+          response = "`#{request_object.request_method} #{request_object.path_info}` undefined in schema (prefix: #{committee_options[:prefix].inspect})."
           raise Committee::InvalidResponse.new(response)
         end
 
         status, headers, body = response_data
+
+        if expected_status.nil?
+          Committee.warn_deprecated('Pass expected response status code to check it against the corresponding schema explicitly.')
+        elsif expected_status != status
+          response = "Expected `#{expected_status}` status code, but it was `#{status}`."
+          raise Committee::InvalidResponse.new(response)
+        end
+
+        if schema_coverage
+          operation_object = router.operation_object(request_object)
+          schema_coverage&.update_response_coverage!(operation_object.original_path, operation_object.http_method, status)
+        end
+
         schema_validator.response_validate(status, headers, [body], true) if validate_response?(status)
       end
 
@@ -55,15 +68,18 @@ module Committee
         @schema_validator ||= router.build_schema_validator(request_object)
       end
 
+      def schema_coverage
+        return nil unless schema.is_a?(Committee::Drivers::OpenAPI3::Schema)
+
+        coverage = committee_options.fetch(:schema_coverage, nil)
+
+        coverage.is_a?(SchemaCoverage) ? coverage : nil
+      end
+
       def old_behavior
         old_assert_behavior = committee_options.fetch(:old_assert_behavior, nil)
         if old_assert_behavior.nil?
-          warn <<-MSG
-          [DEPRECATION] now assert_schema_conform check response schema only.
-            but we will change check request and response in future major version.
-            so if you want to conform response only, please use assert_response_schema_confirm,
-            or you can suppress this message and keep old behavior by setting old_assert_behavior=true.
-          MSG
+          Committee.warn_deprecated('Now assert_schema_conform check response schema only. but we will change check request and response in future major version. so if you want to conform response only, please use assert_response_schema_confirm, or you can suppress this message and keep old behavior by setting old_assert_behavior=true.')
           old_assert_behavior = true
         end
         old_assert_behavior

@@ -30,13 +30,16 @@ describe Committee::Test::Methods do
     @committee_schema = nil
 
     @committee_options = {schema: hyper_schema}
+
+    # TODO: delete when 5.0.0 released because default value changed
+    @committee_options[:parse_response_by_content_type] = false
   end
 
   describe "#assert_schema_conform" do
     it "passes through a valid response" do
       @app = new_rack_app(JSON.generate([ValidApp]))
       get "/apps"
-      assert_schema_conform
+      assert_schema_conform(200)
     end
 
     it "passes with prefix" do
@@ -44,16 +47,25 @@ describe Committee::Test::Methods do
 
       @app = new_rack_app(JSON.generate([ValidApp]))
       get "/v1/apps"
-      assert_schema_conform
+      assert_schema_conform(200)
     end
 
     it "detects an invalid response Content-Type" do
       @app = new_rack_app(JSON.generate([ValidApp]), 200, {})
       get "/apps"
       e = assert_raises(Committee::InvalidResponse) do
-        assert_schema_conform
+        assert_schema_conform(200)
       end
       assert_match(/response header must be set to/i, e.message)
+    end
+
+    it "it detects unexpected response code" do
+      @app = new_rack_app(JSON.generate([ValidApp]), 400)
+      get "/apps"
+      e = assert_raises(Committee::InvalidResponse) do
+        assert_schema_conform(200)
+      end
+      assert_match(/Expected `200` status code, but it was `400`/i, e.message)
     end
 
     it "detects an invalid response Content-Type but ignore because it's not success status code" do
@@ -67,7 +79,7 @@ describe Committee::Test::Methods do
       @app = new_rack_app(JSON.generate([ValidApp]), 400, {})
       get "/apps"
       e = assert_raises(Committee::InvalidResponse) do
-        assert_schema_conform
+        assert_schema_conform(400)
       end
       assert_match(/response header must be set to/i, e.message)
     end

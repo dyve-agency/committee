@@ -435,6 +435,19 @@ describe Committee::Middleware::RequestValidation do
     assert_equal 200, last_response.status
   end
 
+  it "corce form params" do
+    check_parameter = lambda { |env|
+      assert_equal 3, env['committee.params']['age']
+      assert_equal 3, env['committee.request_body_hash']['age']
+      [200, {}, []]
+    }
+
+    @app = new_rack_app_with_lambda(check_parameter, schema: open_api_2_form_schema, raise: true, allow_form_params: true, coerce_form_params: true)
+    header "Content-Type", "application/x-www-form-urlencoded"
+    post "/api/pets", "age=3&name=ab"
+    assert_equal 200, last_response.status
+  end
+
   it "detects an invalid request for OpenAPI" do
     @app = new_rack_app(schema: open_api_2_schema)
     get "/api/pets?limit=foo", nil, { "HTTP_AUTH_TOKEN" => "xxx" }
@@ -495,7 +508,10 @@ describe Committee::Middleware::RequestValidation do
       { description: 'when not specified, includes everything', accept_request_filter: nil, expected: { status: 400 } },
       { description: 'when predicate matches, performs validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/a') }, expected: { status: 400 } },
       { description: 'when predicate does not match, skips validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/x') }, expected: { status: 200 } },
-    ].each do |description:, accept_request_filter:, expected:|
+    ].each do |h|
+      description = h[:description]
+      accept_request_filter = h[:accept_request_filter]
+      expected = h[:expected]
       it description do
         @app = new_rack_app(prefix: '/v1', schema: hyper_schema, accept_request_filter: accept_request_filter)
 
@@ -516,6 +532,9 @@ describe Committee::Middleware::RequestValidation do
 
 
   def new_rack_app_with_lambda(check_lambda, options = {})
+    # TODO: delete when 5.0.0 released because default value changed
+    options[:parse_response_by_content_type] = true if options[:parse_response_by_content_type] == nil
+
     Rack::Builder.new {
       use Committee::Middleware::RequestValidation, options
       run check_lambda

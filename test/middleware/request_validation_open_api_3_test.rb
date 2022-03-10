@@ -34,11 +34,27 @@ describe Committee::Middleware::RequestValidation do
     params = { "datetime_string" => "2016-04-01T16:00:00.000+09:00" }
 
     check_parameter = lambda { |env|
+      assert_equal DateTime, env['committee.query_hash']["datetime_string"].class
+      assert_equal String, env['rack.request.query_hash']["datetime_string"].class
+      [200, {}, []]
+    }
+
+    @app = new_rack_app_with_lambda(check_parameter, schema: open_api_3_schema, coerce_date_times: true, query_hash_key: "committee.query_hash")
+
+    get "/string_params_coercer", params
+    assert_equal 200, last_response.status
+  end
+
+  it "passes given a datetime and with coerce_date_times enabled on GET endpoint overwrite query_hash" do
+    params = { "datetime_string" => "2016-04-01T16:00:00.000+09:00" }
+
+    check_parameter = lambda { |env|
+      assert_equal nil, env['committee.query_hash']
       assert_equal DateTime, env['rack.request.query_hash']["datetime_string"].class
       [200, {}, []]
     }
 
-    @app = new_rack_app_with_lambda(check_parameter, schema: open_api_3_schema, coerce_date_times: true)
+    @app = new_rack_app_with_lambda(check_parameter, schema: open_api_3_schema, coerce_date_times: true, query_hash_key: "rack.request.query_hash")
 
     get "/string_params_coercer", params
     assert_equal 200, last_response.status
@@ -154,7 +170,8 @@ describe Committee::Middleware::RequestValidation do
     }
 
     check_parameter = lambda { |env|
-      hash = env['rack.request.query_hash']
+      # hash = env["committee.query_hash"] # 5.0.x-
+      hash = env["rack.request.query_hash"]
       assert_equal DateTime, hash['nested_array'].first['update_time'].class
       assert_equal 1, hash['nested_array'].first['per_page']
 
@@ -249,8 +266,7 @@ describe Committee::Middleware::RequestValidation do
     }
     post "/characters", JSON.generate(params)
     assert_equal 400, last_response.status
-    # FIXME: when ruby 2.3 dropped, fix because ruby 2.3 return Fixnum, ruby 2.4 or later return Integer
-    assert_match(/expected string, but received #{1.class}:/i, last_response.body)
+    assert_match(/expected string, but received Integer:/i, last_response.body)
   end
 
   it "rescues JSON errors" do
@@ -279,8 +295,7 @@ describe Committee::Middleware::RequestValidation do
     header "Content-Type", "application/json"
     post "/v1/characters", JSON.generate(params)
     assert_equal 400, last_response.status
-    # FIXME: when ruby 2.3 dropped, fix because ruby 2.3 return Fixnum, ruby 2.4 or later return Integer
-    assert_match(/expected string, but received #{1.class}: /i, last_response.body)
+    assert_match(/expected string, but received Integer: /i, last_response.body)
   end
 
   it "ignores paths outside the prefix" do
@@ -333,7 +348,7 @@ describe Committee::Middleware::RequestValidation do
       get "/coerce_path_params/#{not_an_integer}", nil
     end
 
-    assert_match(/expected integer, but received String: abc/i, e.message)
+    assert_match(/expected integer, but received String: \"abc\"/i, e.message)
   end
 
   it "optionally raises an error" do
@@ -362,7 +377,8 @@ describe Committee::Middleware::RequestValidation do
 
   it "passes through a valid request for OpenAPI3" do
     check_parameter = lambda { |env|
-      assert_equal 3, env['rack.request.query_hash']['limit']
+      # assert_equal 3, env['committee.query_hash']['limit'] #5.0.x-
+      assert_equal 3, env['rack.request.query_hash']['limit'] #5.0.x-
       [200, {}, []]
     }
 
@@ -376,7 +392,7 @@ describe Committee::Middleware::RequestValidation do
     get "/characters?limit=foo"
 
     assert_equal 400, last_response.status
-    assert_match(/expected integer, but received String: foo/i, last_response.body)
+    assert_match(/expected integer, but received String: \\"foo\\"/i, last_response.body)
   end
 
   it "ignores errors when ignore_error: true" do
@@ -396,6 +412,51 @@ describe Committee::Middleware::RequestValidation do
     get "/coerce_path_params/1"
   end
 
+  it "corce string and save path hash" do
+    @app = new_rack_app_with_lambda(lambda do |env|
+      assert_equal env['committee.params']['integer'], 21
+      assert_equal env['committee.params'][:integer], 21
+      assert_equal env['committee.path_hash']['integer'], 21
+      assert_equal env['committee.path_hash'][:integer], 21
+      [204, {}, []]
+    end, schema: open_api_3_schema)
+
+    header "Content-Type", "application/json"
+    post '/parameter_option_test/21'
+    assert_equal 204, last_response.status
+  end
+
+  it "corce string and save request body hash" do
+    @app = new_rack_app_with_lambda(lambda do |env|
+      assert_equal env['committee.params']['integer'], 21 # use path parameter
+      assert_equal env['committee.params'][:integer], 21
+      assert_equal env['committee.request_body_hash']['integer'], 42
+      assert_equal env['committee.request_body_hash'][:integer], 42
+      [204, {}, []]
+    end, schema: open_api_3_schema)
+
+    params = {integer: 42}
+
+    header "Content-Type", "application/json"
+    post '/parameter_option_test/21', JSON.generate(params)
+    assert_equal 204, last_response.status
+  end
+
+  it "unpacker test" do
+    @app = new_rack_app_with_lambda(lambda do |env|
+      assert_equal env['committee.params']['integer'], 42
+      assert_equal env['committee.params'][:integer], 42
+      # overwrite by request body...
+      assert_equal env['rack.request.query_hash']['integer'], 42
+      # assert_equal env['rack.request.query_hash'][:integer], 42
+      [204, {}, []]
+    end, schema: open_api_3_schema, raise: true)
+
+    header "Content-Type", "application/x-www-form-urlencoded"
+    post '/validate?integer=21', "integer=42"
+    assert_equal 204, last_response.status
+  end
+
   it "OpenAPI3 raise not support method" do
     @app = new_rack_app(schema: open_api_3_schema)
 
@@ -410,12 +471,16 @@ describe Committee::Middleware::RequestValidation do
     [
       { check_header: true, description: 'valid value', value: 1, expected: { status: 200 } },
       { check_header: true, description: 'missing value', value: nil, expected: { status: 400, error: 'missing required parameters: integer' } },
-      { check_header: true, description: 'invalid value', value: 'x', expected: { status: 400, error: 'expected integer, but received String: x' } },
+      { check_header: true, description: 'invalid value', value: 'x', expected: { status: 400, error: 'expected integer, but received String: \\"x\\"' } },
 
       { check_header: false, description: 'valid value', value: 1, expected: { status: 200 } },
       { check_header: false, description: 'missing value', value: nil, expected: { status: 200 } },
       { check_header: false, description: 'invalid value', value: 'x', expected: { status: 200 } },
-    ].each do |check_header:, description:, value:, expected:|
+    ].each do |h|
+      check_header = h[:check_header]
+      description = h[:description]
+      value = h[:value]
+      expected = h[:expected]
       describe "when #{check_header}" do
         %w(get post put patch delete).each do |method|
           describe method do
@@ -441,7 +506,10 @@ describe Committee::Middleware::RequestValidation do
       { description: 'when not specified, includes everything', accept_request_filter: nil, expected: { status: 400 } },
       { description: 'when predicate matches, performs validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/c') }, expected: { status: 400 } },
       { description: 'when predicate does not match, skips validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/x') }, expected: { status: 200 } },
-    ].each do |description:, accept_request_filter:, expected:|
+    ].each do |h|
+      description = h[:description]
+      accept_request_filter = h[:accept_request_filter]
+      expected = h[:expected]
       it description do
         @app = new_rack_app(prefix: '/v1', schema: open_api_3_schema, accept_request_filter: accept_request_filter)
 
@@ -449,6 +517,16 @@ describe Committee::Middleware::RequestValidation do
 
         assert_equal expected[:status], last_response.status
       end
+    end
+  end
+
+  it 'does not suppress application error' do
+    @app = new_rack_app_with_lambda(lambda { |_|
+      JSON.load('-') # invalid json
+    }, schema: open_api_3_schema, raise: true)
+
+    assert_raises(JSON::ParserError) do
+      get "/error", nil
     end
   end
 
@@ -461,6 +539,9 @@ describe Committee::Middleware::RequestValidation do
   end
 
   def new_rack_app_with_lambda(check_lambda, options = {})
+    # TODO: delete when 5.0.0 released because default value changed
+    options[:parse_response_by_content_type] = true if options[:parse_response_by_content_type] == nil
+
     Rack::Builder.new {
       use Committee::Middleware::RequestValidation, options
       run check_lambda

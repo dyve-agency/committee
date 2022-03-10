@@ -9,7 +9,12 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
     before do
       @path = '/validate'
       @method = 'post'
-      @validator_option = Committee::SchemaValidator::Option.new({}, open_api_3_schema, :open_api_3)
+
+      # TODO: delete when 5.0.0 released because default value changed
+      options = {}
+      options[:parse_response_by_content_type] = true if options[:parse_response_by_content_type] == nil
+
+      @validator_option = Committee::SchemaValidator::Option.new(options, open_api_3_schema, :open_api_3)
     end
 
     def operation_object
@@ -52,8 +57,8 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
         operation_object.validate_request_params({"string" => 1}, HEADER, @validator_option)
       }
 
-      # FIXME: when ruby 2.3 dropped, fix because ruby 2.3 return Fixnum, ruby 2.4 or later return Integer
-      assert_match(/expected string, but received #{1.class}: 1/i, e.message)
+      assert_match(/expected string, but received Integer: 1/i, e.message)
+      assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
     end
 
     it 'support put method' do
@@ -64,8 +69,8 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
         operation_object.validate_request_params({"string" => 1}, HEADER, @validator_option)
       }
 
-      # FIXME: when ruby 2.3 dropped, fix because ruby 2.3 return Fixnum, ruby 2.4 or later return Integer
-      assert_match(/expected string, but received #{1.class}: 1/i, e.message)
+      assert_match(/expected string, but received Integer: 1/i, e.message)
+      assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
     end
 
     it 'support patch method' do
@@ -76,7 +81,8 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
         operation_object.validate_request_params({"integer" => "str"}, HEADER, @validator_option)
       }
 
-      assert_match(/expected integer, but received String: str/i, e.message)
+      assert_match(/expected integer, but received String: "str"/i, e.message)
+      assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
     end
 
     it 'unknown param' do
@@ -110,6 +116,7 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
         }
 
         assert_match(/missing required parameters: query_string/i, e.message)
+        assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
       end
 
       it 'invalid type' do
@@ -121,8 +128,8 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
           )
         }
 
-        # FIXME: when ruby 2.3 dropped, fix because ruby 2.3 return Fixnum, ruby 2.4 or later return Integer
-        assert_match(/expected string, but received #{1.class}: 1/i, e.message)
+        assert_match(/expected string, but received Integer: 1/i, e.message)
+        assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
       end
     end
 
@@ -143,7 +150,8 @@ describe Committee::SchemaValidator::OpenAPI3::OperationWrapper do
           operation_object.validate_request_params({"limit" => "a"}, HEADER, @validator_option)
         }
 
-        assert_match(/expected integer, but received String: a/i, e.message)
+        assert_match(/expected integer, but received String: "a"/i, e.message)
+        assert_kind_of(OpenAPIParser::OpenAPIError, e.original_error)
       end
     end
 

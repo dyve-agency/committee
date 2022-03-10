@@ -16,12 +16,11 @@ module Committee
   end
 
   def self.warn_deprecated(message)
-    if !$VERBOSE.nil?
-      $stderr.puts(message)
-    end
+    warn("[DEPRECATION] #{message}")
   end
 end
 
+require_relative "committee/utils"
 require_relative "committee/drivers"
 require_relative "committee/errors"
 require_relative "committee/middleware"
@@ -31,3 +30,4 @@ require_relative "committee/validation_error"
 
 require_relative "committee/bin/committee_stub"
 require_relative "committee/test/methods"
+require_relative "committee/test/schema_coverage"

@@ -3,5 +3,8 @@
 *.sw*
 tags
 Gemfile.lock
+!/examples/openapi3/Gemfile.lock
+!/examples/json_schema/Gemfile.lock
+!/examples/heroku_api/Gemfile.lock
 .DS_Store
 /coverage/

@@ -28,7 +28,10 @@ describe Committee::Test::Methods do
     # our purposes here in testing the module.
     @committee_router = nil
     @committee_schema = nil
-    @committee_options = nil
+    @committee_options = {}
+
+    # TODO: delete when 5.0.0 released because default value changed
+    @committee_options[:parse_response_by_content_type] = true
   end
 
   describe "Hyper-Schema" do
@@ -36,21 +39,21 @@ describe Committee::Test::Methods do
       sc = JsonSchema.parse!(hyper_schema_data)
       sc.expand_references!
       s = Committee::Drivers::HyperSchema::Driver.new.parse(sc)
-      @committee_options = {schema: s}
+      @committee_options.merge!({schema: s})
     end
 
     describe "#assert_schema_conform" do
       it "passes through a valid response" do
         @app = new_rack_app(JSON.generate([ValidApp]))
         get "/apps"
-        assert_schema_conform
+        assert_schema_conform(200)
       end
 
       it "detects an invalid response Content-Type" do
         @app = new_rack_app(JSON.generate([ValidApp]), {})
         get "/apps"
         e = assert_raises(Committee::InvalidResponse) do
-          assert_schema_conform
+          assert_schema_conform(200)
         end
         assert_match(/response header must be set to/i, e.message)
       end
@@ -61,7 +64,8 @@ describe Committee::Test::Methods do
         _, err = capture_io do
           assert_schema_conform
         end
-        assert_match(/\[DEPRECATION\]/i, err)
+        assert_match(/\[DEPRECATION\] Now assert_schema_conform check response schema only/i, err)
+        assert_match(/\[DEPRECATION\] Pass expected response status code/i, err)
       end
     end
 
@@ -120,7 +124,7 @@ describe Committee::Test::Methods do
 
   describe "OpenAPI3" do
     before do
-      @committee_options = {schema: open_api_3_schema}
+      @committee_options.merge!({schema: open_api_3_schema})
 
       @correct_response = { string_1: :honoka }
     end
@@ -158,7 +162,8 @@ describe Committee::Test::Methods do
         _, err = capture_io do
           assert_schema_conform
         end
-        assert_match(/\[DEPRECATION\]/i, err)
+        assert_match(/\[DEPRECATION\] Now assert_schema_conform check response schema only/i, err)
+        assert_match(/\[DEPRECATION\] Pass expected response status code/i, err)
       end
     end
 
@@ -223,6 +228,145 @@ describe Committee::Test::Methods do
           assert_response_schema_confirm
         end
         assert_match(/`GET \/undefined` undefined in schema/i, e.message)
+      end
+
+      it "raises error when path does not match prefix" do
+        @committee_options.merge!({prefix: '/api'})
+        @app = new_rack_app(JSON.generate(@correct_response))
+        get "/characters"
+        e = assert_raises(Committee::InvalidResponse) do
+          assert_response_schema_confirm
+        end
+        assert_match(/`GET \/characters` undefined in schema \(prefix: "\/api"\)/i, e.message)
+      end
+
+      describe 'coverage' do
+        before do
+          @schema_coverage = Committee::Test::SchemaCoverage.new(open_api_3_coverage_schema)
+          @committee_options.merge!(schema: open_api_3_coverage_schema, schema_coverage: @schema_coverage)
+
+          @app = new_rack_app(JSON.generate({ success: true }))
+        end
+        it 'records openapi coverage' do
+          get "/posts"
+          assert_response_schema_confirm
+          assert_equal({
+            '/threads/{id}' => {
+              'get' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+            '/posts' => {
+              'get' => {
+                'responses' => {
+                  '200' => true,
+                  '404' => false,
+                  'default' => false,
+                },
+              },
+              'post' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+            '/likes' => {
+              'post' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+              'delete' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+          }, @schema_coverage.report)
+        end
+
+        it 'can record openapi coverage correctly when prefix is set' do
+          @committee_options.merge!(prefix: '/api')
+          post "/api/likes"
+          assert_response_schema_confirm
+          assert_equal({
+            '/threads/{id}' => {
+              'get' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+            '/posts' => {
+              'get' => {
+                'responses' => {
+                  '200' => false,
+                  '404' => false,
+                  'default' => false,
+                },
+              },
+              'post' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+            '/likes' => {
+              'post' => {
+                'responses' => {
+                  '200' => true,
+                },
+              },
+              'delete' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+          }, @schema_coverage.report)
+        end
+
+        it 'records openapi coverage correctly with path param' do
+          get "/threads/asd"
+          assert_response_schema_confirm
+          assert_equal({
+            '/threads/{id}' => {
+              'get' => {
+                'responses' => {
+                  '200' => true,
+                },
+              },
+            },
+            '/posts' => {
+              'get' => {
+                'responses' => {
+                  '200' => false,
+                  '404' => false,
+                  'default' => false,
+                },
+              },
+              'post' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+            '/likes' => {
+              'post' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+              'delete' => {
+                'responses' => {
+                  '200' => false,
+                },
+              },
+            },
+          }, @schema_coverage.report)
+        end
       end
     end
   end

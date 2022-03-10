@@ -1,4 +1,4 @@
-# Committee  [![Travis Status](https://travis-ci.org/interagent/committee.svg)](https://travis-ci.org/interagent/committee)
+# Committee  [![ci](https://github.com/interagent/committee/actions/workflows/ci.yaml/badge.svg)](https://github.com/interagent/committee/actions/workflows/ci.yaml) [![Gem Version](https://badge.fury.io/rb/committee.svg)](https://badge.fury.io/rb/committee)
 
 A collection of middleware to help build services with JSON Schema, OpenAPI 2, OpenAPI 3.
 
@@ -6,10 +6,11 @@ A collection of middleware to help build services with JSON Schema, OpenAPI 2, O
 
 Committee is tested on the following MRI versions:
 
-- 2.3
 - 2.4
 - 2.5
 - 2.6
+- 2.7
+- 3.0
 
 ## Committee::Middleware::RequestValidation
 
@@ -49,6 +50,12 @@ Non-boolean options:
 |schema_path| String | supported | supported | Defines the location of the schema file to use for validation. |
 |error_handler| Proc Object | supported | supported | A proc which will be called when error occurs. Take an Error instance as first argument, and request.env as second argument. (e.g. `-> (ex, env) { Raven.capture_exception(ex, extra: { rack_env: env }) }`) |
 |accept_request_filter  | Proc Object | supported | supported | A proc that accepts a Request and returns a boolean. It indicates whether to validate the current request, or not. (e.g. `-> (request) { request.path.start_with?('/something') }`) |
+|params_key| String | supported | supported | Save checked and merged parameter value to request.env using this key. Default value is `committee.params` |
+|headers_key| String | supported | supported | Save checked header value to request.env using this key. Default value is `committee.headers` |
+|query_hash_key| String | supported | supported | Save checked query parameter value to request.env using this key. Default value is `rack.request.query_hash` but we will change  `committee.query_hash` in next version |
+|path_hash_key| String | supported | supported | Save checked path parameter value to request.env using this key. Default value is `committee.path_hash` |
+|request_body_hash_key| String | supported | supported | Save checked request body parameter (json, form) value to request.env using this key. Default value is `committee.request_body_hash` |
+
 
 Note that Hyper-Schema and OpenAPI 2 get the same defaults for options.
 
@@ -57,27 +64,27 @@ Some examples of use:
 ``` bash
 # missing required parameter
 $ curl -X POST http://localhost:9292/account/app-transfers -H "Content-Type: application/json" -d '{"app":"heroku-api"}'
-{"id":"invalid_params","message":"Require params: recipient."}
+{"id":"bad_request","message":"#/paths/~1account~1app-transfers/post/requestBody/content/application~1json/schema missing required parameters: recipient"}
 
 # missing required parameter (should have &query=...)
 $ curl -X GET http://localhost:9292/search?category=all
-{"id":"invalid_params","message":"Require params: query."}
+{"id":"bad_request","message":"#/paths/~1search/get missing required parameters: query"}
 
 # contains an unknown parameter
 $ curl -X POST http://localhost:9292/account/app-transfers -H "Content-Type: application/json" -d '{"app":"heroku-api","recipient":"api@heroku.com","sender":"api@heroku.com"}'
-{"id":"invalid_params","message":"Unknown params: sender."}
+{"id":"bad_request","message":"#/paths/~1account~1app-transfers/post/requestBody/content/application~1json/schema does not define properties: sender"}
 
 # invalid type
 $ curl -X POST http://localhost:9292/account/app-transfers -H "Content-Type: application/json" -d '{"app":"heroku-api","recipient":7}'
-{"id":"invalid_params","message":"Invalid type for key \"recipient\": expected 7 to be [\"string\"]."}
+{"id":"bad_request","message":"#/paths/~1account~1app-transfers/post/requestBody/content/application~1json/schema/properties/recipient expected string, but received Integer: 7"}
 
 # invalid format (supports date-time, email, uuid)
-$ curl -X POST http://localhost:9292/account/app-transfers -H "Content-Type: application/json" -d '{"app":"heroku-api","recipient":"api@heroku"}'
-{"id":"invalid_params","message":"Invalid format for key \"recipient\": expected \"api@heroku\" to be \"email\"."
+$ curl -X POST http://localhost:9292/account/app-transfers -H "Content-Type: application/json" -d '{"app":"heroku-api","recipient":"matz"}'
+{"id":"bad_request","message":"#/paths/~1account~1app-transfers/post/requestBody/content/application~1json/schema/properties/recipient email address format does not match value: matz"}
 
 # invalid pattern
 $ curl -X POST http://localhost:9292/apps -H "Content-Type: application/json" -d '{"name":"$#%"}'
-{"id":"invalid_params","message":"Invalid pattern for key \"name\": expected $#% to match \"(?-mix:^[a-z][a-z0-9-]{3,30}$)\"."}
+{"id":"bad_request","message":"#/paths/~1apps/post/requestBody/content/application~1json/schema/properties/name pattern ^[a-z][a-z0-9-]{3,50}$ does not match value: $#%"}
 ```
 
 ## Committee::Middleware::Stub
@@ -153,6 +160,7 @@ Option values and defaults:
 |raise| false | false | Raise an exception on error instead of responding with a generic error body. |
 |validate_success_only| true | false | Also validate non-2xx responses only. |
 |ignore_error| false | false | Validate and ignore result even if validation is error. So always return original data. |
+|parse_response_by_content_type| false | false | Parse response body to JSON only if Content-Type header is 'application/json'. When false, this always optimistically parses as JSON without checking for Content-Type header. |
 
 No boolean option values:
 
@@ -252,29 +260,46 @@ describe Committee::Middleware::Stub do
   end
 
   def committee_options
-    @committee_options ||= { schema: Committee::Drivers::load_from_file('docs/schema.json'), prefix: "/v1", validate_success_only: true }
+    @committee_options ||= { schema: Committee::Drivers::load_from_file('docs/schema.json'), prefix: "/v1" }
   end
 
   describe "GET /" do
-    it "conforms to schema" do
-      assert_schema_conform
+    it "conforms to schema with 200 response code" do
+      assert_schema_conform(200)
     end
 
     it "conforms to request schema" do
       assert_request_schema_confirm
     end
 
-    it "conforms to response schema" do
-      assert_response_schema_confirm
+    it "conforms to response schema with 200 response code" do
+      assert_response_schema_confirm(200)
     end
 
-    it "conforms to response and request schema" do
+    it "conforms to response and request schema with 200 response code" do
       @committee_options[:old_assert_behavior] = false
-      assert_schema_conform
+      assert_schema_conform(200)
     end
   end
 end
 ```
+
+
+## Tips
+
+### Use Ruby on Rails with coerce option
+Please set `'action_dispatch.request.request_parameters'` to `params_key` option.
+
+```
+use Committee::Middleware::RequestValidation,
+      schema_path: 'docs/schema.json',
+      coerce_date_times: true,
+      params_key: 'action_dispatch.request.request_parameters'
+```
+
+Committee has few options which enable convert request data.
+By default committee save converted data to `committee.params` and rails dose not read it.
+So we need save convertd value to `'action_dispatch.request.request_parameters'` bacause rails create parameter from this value.
 
 ## Using OpenAPI 3
 
@@ -307,6 +332,14 @@ Committee 3.* has many breaking changes so we recommend upgrading to the latest 
 4. Switch to OpenAPI 3 if you'd like to do so.
 
 Important changes are also described below.
+
+
+### Upgrading from Committee 4.* to 5.*
+
+Committee 5.* has few breaking changes so we recommend upgrading to the latest release on 4.* and fixing any deprecation errors you see before upgrading.
+(Now we doesn't release 5.* yet)
+
+- change `parse_response_by_content_type`'s default value from `false` to `true`.
 
 ### Setting schemas in middleware
 
@@ -375,6 +408,62 @@ end
 
 The default assertion option in 2.* was `validate_success_only=true`, but this becomes `validate_success_only=false` in 3.*. For the smoothest possible upgrade, you should set it to `false` in your test suite before upgrading to 3.*.
 
+### Test schema coverage
+You can check how much of your API schema your tests have covered.
+NOTICE: Currently committee only supports schema coverage for **openapi** schemas, and only checks coverage on responses, via `assert_response_schema_confirm` or `assert_schema_conform` methods.
+Usage:
+1. Set schema_coverage option of `committee_options`
+2. Use `assert_response_schema_confirm` or `assert_schema_conform`
+3. Then use `SchemaCoverage#report` or `SchemaCoverage#report_flatten` to get coverage report
+
+Example:
+```ruby
+before do
+  schema_coverage = Committee::Test::SchemaCoverage.new(openapi_schema)
+  @committee_options[:schema_coverage] = schema_coverage
+end
+it 'covers /some_api' do
+  get '/some_api'
+  assert_response_schema_confirm # or assert_schema_conform
+  coverage_report = schema_coverage.report
+  # check coverage expectations of /some_api here
+end
+it 'covers /other_api schema' do
+  get '/other_api'
+  assert_response_schema_confirm # or assert_schema_conform
+  coverage_report = schema_coverage.report
+  # check coverage expectations of /other_api here
+end
+after do
+  coverage_report = schema_coverage.report
+  # check coverage expectations of all apis here
+end
+```
+
+Coverage report structure:
+```
+/* using #report */
+{
+  <path> => {
+    <method> => {
+      'responses' => {
+        <status> => <true|false>
+      }
+    }
+  }
+}
+/* using #report_flatten */
+{
+  responses: [
+    { path: <path>, method: <method>, status: <status>, is_covered: <true|false> },
+  ]
+}
+```
+
+Other helper methods:
+* `Committee::Test::SchemaCoverage.merge_report(<Hash>, <Hash>)`: merge 2 coverage reports together
+* `Committee::Test::SchemaCoverage.flatten_report(<Hash>)`: flatten a coverage report Hash into flatten structure
+
 ### Other changes
 
 * `GET` request bodies are ignored in OpenAPI 3 by default. If you want to use them, set the `allow_get_body` option to `true`.
@@ -398,7 +487,7 @@ bundle exec ruby -Ilib -Itest test/router_test.rb -n /prefix/
 ## Release
 
 1. Update the version in `committee.gemspec` as appropriate for [semantic
-   versioning](http://semver.org) and add details to `CHANGELOG`.
+   versioning](http://semver.org) and add details to `CHANGELOG.md`.
 2. Commit those changes. Use a commit message like `Bump version to 1.2.3`.
 3. Run the `release` task:
 

@@ -55,8 +55,16 @@ def open_api_2_schema
   @open_api_2_schema ||= Committee::Drivers.load_from_file(open_api_2_schema_path)
 end
 
+def open_api_2_form_schema
+  @open_api_2_form_schema ||= Committee::Drivers.load_from_file(open_api_2_form_schema_path)
+end
+
 def open_api_3_schema
-  @open_api_3_schema ||= Committee::Drivers.load_from_data(open_api_3_data)
+  @open_api_3_schema ||= Committee::Drivers.load_from_file(open_api_3_schema_path)
+end
+
+def open_api_3_coverage_schema
+  @open_api_3_coverage_schema ||= Committee::Drivers.load_from_file(open_api_3_coverage_schema_path)
 end
 
 # Don't cache this because we'll often manipulate the created hash in tests.
@@ -67,6 +75,10 @@ end
 # Don't cache this because we'll often manipulate the created hash in tests.
 def open_api_2_data
   JSON.parse(File.read(open_api_2_schema_path))
+end
+
+def open_api_2_form_data
+  JSON.parse(File.read(open_api_2_form_schema_path))
 end
 
 def open_api_3_data
@@ -81,8 +93,16 @@ def open_api_2_schema_path
   "./test/data/openapi2/petstore-expanded.json"
 end
 
+def open_api_2_form_schema_path
+  "./test/data/openapi2/petstore-expanded-form.json"
+end
+
 def open_api_3_schema_path
   "./test/data/openapi3/normal.yaml"
+end
+
+def open_api_3_coverage_schema_path
+  "./test/data/openapi3/coverage.yaml"
 end
 
 def open_api_3_0_1_schema_path

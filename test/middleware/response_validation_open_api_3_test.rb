@@ -34,6 +34,14 @@ describe Committee::Middleware::ResponseValidation do
     assert_equal 200, last_response.status
   end
 
+  it "passes through a invalid json with parse_response_by_content_type option" do
+    @app = new_response_rack("csv response", { "Content-Type" => "test/csv"}, schema: open_api_3_schema, parse_response_by_content_type: true)
+
+    get "/csv"
+
+    assert_equal 200, last_response.status
+  end
+
   it "passes through not definition" do
     @app = new_response_rack(JSON.generate(CHARACTERS_RESPONSE), {}, schema: open_api_3_schema)
     get "/no_data"
@@ -99,16 +107,34 @@ describe Committee::Middleware::ResponseValidation do
     assert_match(/valid JSON/i, last_response.body)
   end
 
+  describe "remote schema $ref" do
+    it "passes through a valid response" do
+      @app = new_response_rack(JSON.generate({ "sample" => "value" }), {}, schema: open_api_3_schema)
+      get "/ref-sample"
+      assert_equal 200, last_response.status
+    end
+
+    it "detects a invalid response" do
+      @app = new_response_rack("{}", {}, schema: open_api_3_schema)
+      get "/ref-sample"
+      assert_equal 500, last_response.status
+    end
+  end
+
   describe 'check header' do
     [
       { check_header: true, description: 'valid value', header: { 'integer' => 1 }, expected: { status: 200 } },
       { check_header: true, description: 'missing value', header: { 'integer' => nil }, expected: { error: 'headers/integer/schema does not allow null values' } },
-      { check_header: true, description: 'invalid value', header: { 'integer' => 'x' }, expected: { error: 'headers/integer/schema expected integer, but received String: x' } },
+      { check_header: true, description: 'invalid value', header: { 'integer' => 'x' }, expected: { error: 'headers/integer/schema expected integer, but received String: "x"' } },
 
       { check_header: false, description: 'valid value', header: { 'integer' => 1 }, expected: { status: 200 } },
       { check_header: false, description: 'missing value', header: { 'integer' => nil }, expected: { status: 200 } },
       { check_header: false, description: 'invalid value', header: { 'integer' => 'x' }, expected: { status: 200 } },
-    ].each do |check_header:, description:, header:, expected:|
+    ].each do |h|
+      check_header = h[:check_header]
+      description = h[:description]
+      header = h[:header]
+      expected = h[:expected]
       describe "when #{check_header}" do
         %w(get post put patch delete).each do |method|
           describe method do
@@ -151,7 +177,7 @@ describe Committee::Middleware::ResponseValidation do
         get "/characters"
       end
 
-      assert_match(/but received String: 1/i, e.message)
+      assert_match(/but received String: \"1\"/i, e.message)
     end
 
     it "detects an invalid response status code with validate_success_only=true" do
@@ -174,7 +200,11 @@ describe Committee::Middleware::ResponseValidation do
       { description: 'when not specified, includes everything', accept_request_filter: nil, expected: { status: 500 } },
       { description: 'when predicate matches, performs validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/c') }, expected: { status: 500 } },
       { description: 'when predicate does not match, skips validation', accept_request_filter: -> (request) { request.path.start_with?('/v1/x') }, expected: { status: 200 } },
-    ].each do |description:, accept_request_filter:, expected:|
+    ].each do |h|
+      description = h[:description]
+      accept_request_filter = h[:accept_request_filter]
+      expected = h[:expected]
+
       it description do
         @app = new_response_rack('not_json', {}, schema: open_api_3_schema, prefix: '/v1', accept_request_filter: accept_request_filter)
 
@@ -185,9 +215,25 @@ describe Committee::Middleware::ResponseValidation do
     end
   end
 
+  it 'does not suppress application error' do
+    @app = Rack::Builder.new {
+      use Committee::Middleware::ResponseValidation, {schema: open_api_3_schema, raise: true}
+      run lambda { |_|
+        JSON.load('-') # invalid json  
+      }
+    }
+
+    assert_raises(JSON::ParserError) do
+      get "/error", nil
+    end
+  end
+
   private
 
   def new_response_rack(response, headers = {}, options = {}, rack_options = {})
+    # TODO: delete when 5.0.0 released because default value changed
+    options[:parse_response_by_content_type] = true if options[:parse_response_by_content_type] == nil
+
     status = rack_options[:status] || 200
     headers = {
       "Content-Type" => "application/json"
